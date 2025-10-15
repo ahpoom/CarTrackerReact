@@ -8,7 +8,6 @@ const port = 3000;
 
 // ----------------------------------------------------
 // PostgreSQL Connection Configuration
-// user: 'postgres', host: 'localhost', database: 'Car', password: '1234', port: 5432
 // ----------------------------------------------------
 const pool = new Pool({
     user: 'postgres',
@@ -19,20 +18,26 @@ const pool = new Pool({
 });
 
 // Middleware
-app.use(cors()); // อนุญาตให้ frontend เข้าถึง API ได้
-app.use(express.json()); // สำหรับการอ่าน JSON body
+app.use(cors()); 
+app.use(express.json()); 
 
 /**
  * ฟังก์ชันสำหรับแปลงชื่อคอลัมน์จาก snake_case (Postgres)
  * เป็น camelCase (JavaScript/TypeScript)
+ * *** แก้ไข: จัดการคอลัมน์ Primary Key 'financeid' ให้เป็น 'id' ในฝั่ง JS ***
  */
 const toCamelCase = (row) => {
     if (!row) return null;
     const newRow = {};
     for (const key in row) {
-        // แปลง 'license_plate' เป็น 'licensePlate'
-        const camelCaseKey = key.replace(/_([a-z])/g, (match, char) => char.toUpperCase());
-        newRow[camelCaseKey] = row[key];
+        // หากคอลัมน์เป็น Primary Key ชื่อ 'financeid' ให้เปลี่ยนชื่อเป็น 'id'
+        if (key === 'financeid') {
+            newRow['id'] = row[key];
+        } else {
+            // แปลง 'license_plate' เป็น 'licensePlate'
+            const camelCaseKey = key.replace(/_([a-z])/g, (match, char) => char.toUpperCase());
+            newRow[camelCaseKey] = row[key];
+        }
     }
     return newRow;
 };
@@ -41,6 +46,7 @@ const toCamelCase = (row) => {
 // CONNECTION HEALTH CHECK 
 // ----------------------------------------------------
 async function checkDatabaseConnection() {
+    // โค้ดส่วนนี้ยังคงเดิม
     try {
         const client = await pool.connect();
         const result = await client.query('SELECT current_database()');
@@ -64,14 +70,15 @@ async function checkDatabaseConnection() {
 
 
 // ----------------------------------------------------
-// 1. OPENAPI / SWAGGER SPECIFICATION 
+// 1. OPENAPI / SWAGGER SPECIFICATION (Same as previous)
 // ----------------------------------------------------
-
+// โค้ดส่วน OpenAPI/Swagger ยังคงเดิม เพราะใช้ 'id' เป็นชื่อมาตรฐานใน Schema
+// ----------------------------------------------------
 const CarDataSchema = {
     "type": "object",
     "description": "โครงสร้างข้อมูลรถยนต์ (แปลงจาก snake_case ใน Postgres เป็น camelCase ใน API)",
     "properties": {
-        "id": { "type": "integer", "description": "รหัสรถยนต์ที่ไม่ซ้ำกัน" },
+        "financeid": { "type": "integer", "description": "รหัสรถยนต์ที่ไม่ซ้ำกัน" },
         "licensePlate": { "type": "string", "description": "เลขทะเบียนเต็มพร้อมจังหวัด" },
         "registrationNumber": { "type": "string", "description": "หมายเลขทะเบียนรถ" },
         "brand": { "type": "string", "description": "ยี่ห้อรถ" },
@@ -83,7 +90,7 @@ const CarDataSchema = {
         "financeStatus": { 
             "type": "string", 
             "description": "สถานะการเงิน",
-            "enum": ["ผ่อนชำระ", "เสร็จสิ้น", "ชำระเต็ม"] 
+            "enum": ["ผ่อนชำระ", "เสร็จสิ้น", "ชำระเต็ม", "กำลังผ่อน"]
         },
         "remainingAmount": { "type": "number", "format": "int32", "description": "ยอดคงเหลือ (บาท)" },
         "monthlyPayment": { "type": "number", "format": "int32", "description": "ยอดผ่อนต่อเดือน (บาท)" }
@@ -143,7 +150,7 @@ const openApiSpec = {
                 },
                 "responses": {
                     "201": { "description": "สร้างข้อมูลสำเร็จ", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CarData" } } } },
-                    "400": { "description": "ข้อมูลที่ส่งมาไม่ถูกต้อง" },
+                    "400": { "description": "ข้อมูลที่ส่งมาไม่ถูกต้อง (เช่น ข้อมูลไม่ครบ หรือ เลขทะเบียนซ้ำ)" },
                     "500": { "description": "ข้อผิดพลาดของเซิร์ฟเวอร์" }
                 }
             }
@@ -156,10 +163,10 @@ const openApiSpec = {
                 "parameters": [
                     {
                         "in": "path",
-                        "name": "id",
+                        "name": "financeid",
                         "schema": { "type": "integer" },
                         "required": true,
-                        "description": "ID ของรถยนต์ที่ต้องการอัปเดต"
+                        "description": "financeid ของรถยนต์ที่ต้องการอัปเดต"
                     }
                 ],
                 "requestBody": {
@@ -172,6 +179,7 @@ const openApiSpec = {
                 },
                 "responses": {
                     "200": { "description": "อัปเดตข้อมูลสำเร็จ", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CarData" } } } },
+                    "400": { "description": "ข้อมูลที่ส่งมาไม่ถูกต้อง (เช่น เลขทะเบียนซ้ำกับรถคันอื่น)" },
                     "404": { "description": "ไม่พบรถยนต์ตาม ID ที่ระบุ" },
                     "500": { "description": "ข้อผิดพลาดของเซิร์ฟเวอร์" }
                 }
@@ -183,7 +191,7 @@ const openApiSpec = {
                 "parameters": [
                     {
                         "in": "path",
-                        "name": "id",
+                        "name": "financeid",
                         "schema": { "type": "integer" },
                         "required": true,
                         "description": "ID ของรถยนต์ที่ต้องการลบ"
@@ -220,12 +228,12 @@ app.get('/api/cars', async (req, res) => {
     const queryParams = [];
 
     if (plate) {
-        // ใช้ ILIKE สำหรับการค้นหาแบบไม่คำนึงถึงขนาดตัวอักษร
         queryText += ' WHERE license_plate ILIKE $1';
         queryParams.push(`%${plate}%`);
     }
 
-    queryText += ' ORDER BY id ASC';
+    // *** แก้ไข: เปลี่ยน ORDER BY id เป็น ORDER BY financeid ***
+    queryText += ' ORDER BY financeid ASC'; 
     
     try {
         const result = await pool.query(queryText, queryParams);
@@ -239,42 +247,59 @@ app.get('/api/cars', async (req, res) => {
 
 // [C] CREATE (Add new car)
 app.post('/api/cars', async (req, res) => {
-    // ดึงข้อมูลในรูปแบบ camelCase จาก Request Body
     const { 
         licensePlate, registrationNumber, brand, model, color, chassisNo, 
         engineNo, finance, financeStatus, remainingAmount, monthlyPayment 
     } = req.body;
 
-    // ตรวจสอบข้อมูลขั้นพื้นฐาน
+    // 1. ตรวจสอบข้อมูลบังคับ (ไม่มีการแก้ไข)
     if (!licensePlate || !brand || !financeStatus) {
         return res.status(400).send('Missing required fields: licensePlate, brand, and financeStatus are mandatory.');
     }
     
-    // ตั้งค่า Query โดยใช้ snake_case สำหรับคอลัมน์ Postgres
-    const queryText = `
-        INSERT INTO cars (
-            license_plate, registration_number, brand, model, color, chassis_no, 
-            engine_no, finance, finance_status, remaining_amount, monthly_payment
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        RETURNING *;
-    `;
-    const queryParams = [
-        licensePlate, registrationNumber || null, brand, model || null, color || null, 
-        chassisNo || null, engineNo || null, finance || null, financeStatus, 
-        remainingAmount || 0, monthlyPayment || 0
-    ];
+    // 2. Normalization ของ License Plate (ไม่มีการแก้ไข)
+    const normalizedLicensePlate = licensePlate.trim().toUpperCase().replace(/\s/g, '');
+
+    // 3. การันตีว่าเป็น Number (ไม่มีการแก้ไข)
+    const amtRemaining = Number(remainingAmount) || 0;
+    const amtMonthly = Number(monthlyPayment) || 0;
 
     try {
+        // 4. ตรวจสอบความซ้ำซ้อนของเลขทะเบียน 
+        // *** แก้ไข: เปลี่ยน SELECT id เป็น SELECT financeid ***
+        const duplicateCheckQuery = 'SELECT financeid FROM cars WHERE UPPER(license_plate) = $1';
+        const duplicateResult = await pool.query(duplicateCheckQuery, [normalizedLicensePlate]);
+        
+        if (duplicateResult.rows.length > 0) {
+             return res.status(400).json({
+                message: "Duplicate License Plate",
+                detail: `เลขทะเบียน '${normalizedLicensePlate}' มีอยู่ในระบบแล้ว`,
+             });
+        }
+        
+        // 5. ตั้งค่า Query (ไม่มีการแก้ไขในคอลัมน์ INSERT)
+        const queryText = `
+            INSERT INTO cars (
+                license_plate, registration_number, brand, model, color, chassis_no, 
+                engine_no, finance, finance_status, remaining_amount, monthly_payment
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING *;
+        `;
+        const queryParams = [
+            normalizedLicensePlate, 
+            registrationNumber || null, brand, model || null, color || null, 
+            chassisNo || null, engineNo || null, finance || null, financeStatus, 
+            amtRemaining, 
+            amtMonthly 
+        ];
+
         const result = await pool.query(queryText, queryParams);
-        // ตอบกลับด้วยข้อมูลที่สร้างใหม่ในรูปแบบ camelCase
+        // ตอบกลับด้วยข้อมูลที่สร้างใหม่ในรูปแบบ camelCase (toCamelCase จะแปลง financeid เป็น id)
         res.status(201).json(toCamelCase(result.rows[0]));
     } catch (err) {
-        if (err.code === '23505') { // Unique violation (e.g., duplicate license plate)
-             return res.status(400).send(`License Plate '${licensePlate}' already exists.`);
-        }
         console.error('❌ SQL Query Error when creating car data:', err.message);
-        res.status(500).send('Server Error: Could not create car data.');
+        res.status(500).send('Server Error: Could not create car data. Check console for details.');
     }
 });
 
@@ -286,26 +311,49 @@ app.put('/api/cars/:id', async (req, res) => {
         engineNo, finance, financeStatus, remainingAmount, monthlyPayment 
     } = req.body;
 
-    // ตรวจสอบข้อมูลขั้นพื้นฐาน
+    // 1. ตรวจสอบข้อมูลบังคับ (ไม่มีการแก้ไข)
     if (!licensePlate || !brand || !financeStatus) {
         return res.status(400).send('Missing required fields: licensePlate, brand, and financeStatus are mandatory.');
     }
-
-    const queryText = `
-        UPDATE cars SET 
-            license_plate = $1, registration_number = $2, brand = $3, model = $4, color = $5, 
-            chassis_no = $6, engine_no = $7, finance = $8, finance_status = $9, 
-            remaining_amount = $10, monthly_payment = $11
-        WHERE id = $12
-        RETURNING *;
-    `;
-    const queryParams = [
-        licensePlate, registrationNumber || null, brand, model || null, color || null, 
-        chassisNo || null, engineNo || null, finance || null, financeStatus, 
-        remainingAmount || 0, monthlyPayment || 0, id
-    ];
+    
+    // 2. Normalization ของ License Plate (ไม่มีการแก้ไข)
+    const normalizedLicensePlate = licensePlate.trim().toUpperCase().replace(/\s/g, '');
+    
+    // 3. การันตีว่าเป็น Number (ไม่มีการแก้ไข)
+    const amtRemaining = Number(remainingAmount) || 0;
+    const amtMonthly = Number(monthlyPayment) || 0;
 
     try {
+        // 4. ตรวจสอบความซ้ำซ้อนก่อน UPDATE 
+        // *** แก้ไข: เปลี่ยน SELECT id เป็น SELECT financeid และ WHERE id != $2 เป็น WHERE financeid != $2 ***
+        const duplicateCheckQuery = 'SELECT financeid FROM cars WHERE UPPER(license_plate) = $1 AND financeid != $2';
+        const duplicateResult = await pool.query(duplicateCheckQuery, [normalizedLicensePlate, id]);
+        
+        if (duplicateResult.rows.length > 0) {
+             return res.status(400).json({
+                message: "Duplicate License Plate",
+                detail: `เลขทะเบียน '${normalizedLicensePlate}' ซ้ำกับรถคันอื่นในระบบ`,
+             });
+        }
+
+        const queryText = `
+            UPDATE cars SET 
+                license_plate = $1, registration_number = $2, brand = $3, model = $4, color = $5, 
+                chassis_no = $6, engine_no = $7, finance = $8, finance_status = $9, 
+                remaining_amount = $10, monthly_payment = $11
+            // *** แก้ไข: เปลี่ยน WHERE id = $12 เป็น WHERE financeid = $12 ***
+            WHERE financeid = $12 
+            RETURNING *;
+        `;
+        const queryParams = [
+            normalizedLicensePlate, 
+            registrationNumber || null, brand, model || null, color || null, 
+            chassisNo || null, engineNo || null, finance || null, financeStatus, 
+            amtRemaining, 
+            amtMonthly, 
+            id // id ที่รับมาจาก params จะถูกใช้เป็นค่า $12
+        ];
+
         const result = await pool.query(queryText, queryParams);
 
         if (result.rows.length === 0) {
@@ -314,7 +362,7 @@ app.put('/api/cars/:id', async (req, res) => {
         res.status(200).json(toCamelCase(result.rows[0]));
     } catch (err) {
         console.error('❌ SQL Query Error when updating car data:', err.message);
-        res.status(500).send('Server Error: Could not update car data.');
+        res.status(500).send('Server Error: Could not update car data. Check console for details.');
     }
 });
 
@@ -322,7 +370,8 @@ app.put('/api/cars/:id', async (req, res) => {
 app.delete('/api/cars/:id', async (req, res) => {
     const { id } = req.params;
 
-    const queryText = 'DELETE FROM cars WHERE id = $1 RETURNING id;';
+    // *** แก้ไข: เปลี่ยน WHERE id = $1 RETURNING id; เป็น WHERE financeid = $1 RETURNING financeid; ***
+    const queryText = 'DELETE FROM cars WHERE financeid = $1 RETURNING financeid;';
     
     try {
         const result = await pool.query(queryText, [id]);
@@ -334,12 +383,12 @@ app.delete('/api/cars/:id', async (req, res) => {
         res.status(204).send();
     } catch (err) {
         console.error('❌ SQL Query Error when deleting car data:', err.message);
-        res.status(500).send('Server Error: Could not delete car data.');
+        res.status(500).send('Server Error: Could not delete car data. Check console for details.');
     }
 });
 
 
-// Start Server
+// Start Server (โค้ดส่วนนี้ยังคงเดิม)
 async function startServer() {
     const isConnected = await checkDatabaseConnection();
 
@@ -348,7 +397,7 @@ async function startServer() {
             console.log(`✅ Backend server running at http://localhost:${port}`);
             console.log(`📚 Swagger UI documentation available at http://localhost:${port}/api-docs`);
             console.log('---');
-            console.log('HINT: For the React app to work, ensure the API URL in CarManagementApp.jsx is correct: http://192.168.1.39:3000/api/cars');
+            console.log('HINT: สำหรับ Front-end (Web CRUD) ให้ตรวจสอบว่า API URL ชี้ไปที่: http://192.168.1.33:3000/api/cars');
         });
     } else {
         console.log('🛑 Server startup aborted due to critical database connection error. Please fix the connection configuration.');
